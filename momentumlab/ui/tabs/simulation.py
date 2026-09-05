@@ -1,15 +1,26 @@
 """Tab 4 — the BTC <-> alts rotation backtest."""
 from __future__ import annotations
 
+import pandas as pd
 import streamlit as st
 
-from ...strategy import Backtester
+from ...strategy import Backtester, BacktestResult, StrategyConfig
 from ..context import DashboardContext
 from ..strategy_form import StrategyForm
 from ..strategy_report import StrategyReportView
 from .base import DashboardTab
 
 BASE_ASSET = "BTC"
+
+
+@st.cache_data(show_spinner="Симуляція…", max_entries=32)
+def run_backtest(prices: pd.DataFrame, interval: str, start: str, end: str,
+                 config_key: str, _config: StrategyConfig) -> BacktestResult:
+    """The backtest keyed on its inputs, so a rerun caused by any other widget
+    (a sort order, a log-scale toggle) does not simulate five years again.
+    `_config` is not hashed; `config_key` (its repr) stands in for it."""
+    return Backtester(_config, interval).run(
+        prices, start=pd.Timestamp(start), end=pd.Timestamp(end))
 
 
 class SimulationTab(DashboardTab):
@@ -38,8 +49,9 @@ class SimulationTab(DashboardTab):
         try:
             config = choices.to_config(settings.smoothing, settings.smoothing_days,
                                        settings.mode)
-            result = Backtester(config, settings.timeframe).run(
-                ctx.prices[[BASE_ASSET] + choices.pool], start=ctx.low, end=ctx.high)
+            result = run_backtest(
+                ctx.prices[[BASE_ASSET] + choices.pool], settings.interval,
+                str(ctx.low), str(ctx.high), repr(config), config)
         except ValueError as exc:
             st.error(str(exc))
             return

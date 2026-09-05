@@ -31,7 +31,12 @@ class ChartFactory:
         return self.colors.get(coin, STRATEGY_COLOR)
 
     def _thin(self, frame):
-        return decimate(frame, self.max_points)
+        thinned = decimate(frame, self.max_points)
+        # plotly serialises a tz-aware DatetimeIndex one stamp at a time, which
+        # is ~20x slower than a naive one; the values are UTC either way.
+        if isinstance(thinned.index, pd.DatetimeIndex) and thinned.index.tz is not None:
+            thinned = thinned.tz_convert(None)
+        return thinned
 
     # ------------------------------------------------------------------
     # momentum curves

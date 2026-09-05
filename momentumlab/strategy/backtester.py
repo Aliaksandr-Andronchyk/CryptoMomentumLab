@@ -56,8 +56,8 @@ class Backtester:
         return BacktestResult(
             equity=equity,
             hold_equity=hold,
-            weights=pd.DataFrame(output.weights).set_index("time"),
-            active=pd.DataFrame(output.active).set_index("time"),
+            weights=output.weights,
+            active=output.active,
             trades=pd.DataFrame(output.trades, columns=TRADE_COLUMNS),
             momentum=local.momentum,
             diff=local.diff,

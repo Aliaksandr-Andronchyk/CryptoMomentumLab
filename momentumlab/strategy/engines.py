@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 import numpy as np
+import pandas as pd
 
 from .config import StrategyConfig
 from .market import MarketView
@@ -22,8 +23,8 @@ from .signals import EarlyExitRule
 @dataclass
 class EngineOutput:
     equity: np.ndarray
-    weights: list[dict] = field(default_factory=list)
-    active: list[dict] = field(default_factory=list)
+    weights: pd.DataFrame      # portfolio weight of every column at each recorded bar
+    active: pd.DataFrame       # bool: did each alt hold a slot at that bar
     trades: list[dict] = field(default_factory=list)
     early_exits: list[dict] = field(default_factory=list)
 
@@ -45,8 +46,12 @@ class RotationEngine(ABC):
         self.portfolio = Portfolio(market, config.fee_rate, initial_capital, start_pos)
         self.state = np.zeros(market.n_alts, dtype=bool)
         self.equity = np.empty(market.n_bars)
-        self.weight_rows: list[dict] = []
-        self.active_rows: list[dict] = []
+        # Per-bar bookkeeping is kept as raw numpy (quantities and slot state
+        # at every recorded bar) and turned into frames once at the end. The
+        # old per-bar dict rows cost more than the trading logic itself.
+        self.recorded: list[int] = []
+        self.quantity_log = np.zeros((market.n_bars, market.n_columns))
+        self.state_log = np.zeros((market.n_bars, market.n_alts), dtype=bool)
         self.early_exit_rows: list[dict] = []
 
     @abstractmethod
@@ -100,16 +105,32 @@ class RotationEngine(ABC):
     # bookkeeping
     # ------------------------------------------------------------------
     def _record_bar(self, pos: int) -> None:
-        self.weight_rows.append(self.portfolio.weight_row(pos))
-        self.active_rows.append({
-            "time": self.market.time_at(pos),
-            **{coin: bool(self.state[i]) for i, coin in enumerate(self.market.alts)},
-        })
+        self.recorded.append(pos)
+        self.quantity_log[pos] = self.portfolio.quantities
+        self.state_log[pos] = self.state
+
+    def _book(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Recorded bar positions, holding values at those bars, and their totals.
+
+        Same arithmetic as `Portfolio.values_at` / `total_value`, just for all
+        recorded bars at once (not-yet-listed coins count as 0, not NaN).
+        """
+        rows = np.asarray(self.recorded, dtype=int)
+        values = np.nan_to_num(self.quantity_log[rows] * self.market.prices[rows], nan=0.0)
+        return rows, values, values.sum(axis=1)
 
     def _output(self) -> EngineOutput:
-        return EngineOutput(equity=self.equity, weights=self.weight_rows,
-                            active=self.active_rows, trades=self.portfolio.trades,
-                            early_exits=self.early_exit_rows)
+        rows, values, totals = self._book()
+        weights = np.divide(values, totals[:, None], out=np.zeros_like(values),
+                            where=totals[:, None] > 0)
+        index = self.market.index[rows].rename("time")
+        return EngineOutput(
+            equity=self.equity,
+            weights=pd.DataFrame(weights, index=index, columns=self.market.columns),
+            active=pd.DataFrame(self.state_log[rows], index=index, columns=self.market.alts),
+            trades=self.portfolio.trades,
+            early_exits=self.early_exit_rows,
+        )
 
 
 class TargetWeightEngine(RotationEngine):
@@ -179,7 +200,9 @@ class IncrementalEngine(RotationEngine):
             if pos > 0:
                 self._trade_bar(pos)
             self._record_bar(pos)
-            self.equity[pos] = self.portfolio.total_value(pos)
+        # every bar was recorded, so the book totals are the equity curve
+        _, _, totals = self._book()
+        self.equity[:] = totals
         return self._output()
 
     def _trade_bar(self, pos: int) -> None:

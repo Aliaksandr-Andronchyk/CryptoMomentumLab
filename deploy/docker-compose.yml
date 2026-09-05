@@ -1,0 +1,68 @@
+# Crypto Momentum Lab on Artem's VPS, deployed as a Portainer stack from git
+# (repository https://github.com/SashaAndronchyk/CryptoMomentumLab, branch deploy, compose path deploy/docker-compose.yml).
+#
+# Services:
+#   momentum  - the Streamlit dashboard, built from ../Dockerfile, candle cache in a named volume
+#   prefetch  - one-shot warm-up of the cache (5y of 2h candles for the default universe), runs once per deploy
+#   auth-init - writes the basic-auth user list for Caddy from the AUTH_USERS_B64 stack variable
+#   caddy     - HTTPS (Let's Encrypt) + password in front of the dashboard on SITE (default sslip.io name of the VPS)
+#
+# Stack variables (set in Portainer, not in git):
+#   SITE            public host name, e.g. momentum.151-241-227-47.sslip.io
+#   AUTH_USERS_B64  base64 of htpasswd-style lines "user bcrypt-hash" (Caddy basic_auth format, one per line)
+services:
+  momentum:
+    build:
+      context: ..
+    image: cryptomomentumlab:deploy
+    restart: unless-stopped
+    volumes:
+      - momentum-cache:/app/data_cache
+    expose: ["8501"]
+    deploy:
+      resources:
+        limits: {memory: 2g}
+
+  prefetch:
+    image: cryptomomentumlab:deploy
+    restart: "no"
+    command: ["python", "prefetch.py", "--interval", "2h", "--years", "5"]
+    volumes:
+      - momentum-cache:/app/data_cache
+    depends_on:
+      momentum:
+        condition: service_started
+
+  auth-init:
+    image: alpine:3.20
+    restart: "no"
+    environment:
+      AUTH_USERS_B64: ${AUTH_USERS_B64}
+    volumes:
+      - caddy-auth:/auth
+    command: ["sh", "-c", "echo \"$$AUTH_USERS_B64\" | base64 -d > /auth/users.caddy && echo users written"]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE: ${SITE:-momentum.151-241-227-47.sslip.io}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-auth:/auth:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      auth-init:
+        condition: service_completed_successfully
+      momentum:
+        condition: service_started
+
+volumes:
+  momentum-cache:
+  caddy-auth:
+  caddy-data:
+  caddy-config:

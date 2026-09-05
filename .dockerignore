@@ -1,0 +1,13 @@
+.git
+.venv
+data_cache
+__pycache__
+*.pyc
+.pytest_cache
+tests
+docs
+tools
+branding
+deploy
+.claude
+run.ps1

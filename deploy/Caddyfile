@@ -1,0 +1,15 @@
+# HTTPS + password in front of the dashboard. SITE comes from the stack environment;
+# /auth/users.caddy is written by the auth-init service (lines: "user bcrypt-hash").
+{} {
+	encode zstd gzip
+	basic_auth {
+		import /auth/users.caddy
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy same-origin
+	}
+	reverse_proxy momentum:8501
+}

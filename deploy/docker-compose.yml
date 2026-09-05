@@ -68,7 +68,7 @@ services:
 configs:
   caddyfile:
     content: |
-      {$SITE} {
+      ${SITE:-momentum.151-241-227-47.sslip.io} {
       	encode zstd gzip
       	basic_auth {
       		import /auth/users.caddy

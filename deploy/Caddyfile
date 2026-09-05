@@ -1,6 +1,6 @@
 # HTTPS + password in front of the dashboard. SITE comes from the stack environment;
 # /auth/users.caddy is written by the auth-init service (lines: "user bcrypt-hash").
-{} {
+{$SITE} {
 	encode zstd gzip
 	basic_auth {
 		import /auth/users.caddy
